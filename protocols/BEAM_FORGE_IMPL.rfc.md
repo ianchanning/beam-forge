@@ -155,13 +155,20 @@ defp handle_exit(1, state), do: {:error, state}  # supervisor will restart
 **Project structure:**
 
 ```
-safer-ralph/          # Unchanged. The bash foundation.
-  sandbox.sh
+safer-ralph/          # Untouched. Never modified.
+  sandbox.sh          # The only thing beam-forge depends on.
   ralph.sh
-  beam_forge.sh       # Added in Stage 1
-  protocols/
 
-beam-forge-otp/       # New repo, or safer-ralph/orchestrator/
+beam-forge/           # This repo.
+  beam_forge.sh       # The loop. The real thing.
+  protocols/
+    BEAM_FORGE.md
+    BEAM_FORGE_IMPL.md
+    worker.md
+    judge.md
+    architect.md
+
+beam-forge-otp/       # Stage 3: separate repo, optional.
   mix.exs
   lib/
     orchestrator/
