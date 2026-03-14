@@ -18,7 +18,7 @@ Build an evolutionary loop for AI agents.
 - [2026-03-14] **Atomic Precision:** Commit frequently. Commit atomically. Use Conventional Commits. No sloppy "stuff changed" messages.
 
 ## The Rabbit Hole Tracker
-- [ ] Forge `beam_forge.sh`.
+- [/] Forge `beam_forge.sh` (Structure only).
 - [x] Scribe `protocols/worker.md`.
 - [x] Scribe `protocols/judge.md`.
 - [x] Scribe `protocols/architect.md`.
