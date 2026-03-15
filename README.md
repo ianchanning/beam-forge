@@ -33,14 +33,18 @@ The output isn't just a passing codebase — it's a **vetted strategy document**
 
 ## Prerequisites
 
-```bash
-# Install safer-ralph first
-git clone https://github.com/ianchanning/safer-ralph
-cd safer-ralph && ./sandbox.sh build
-
-# Make sandbox.sh available
-export PATH="$PATH:/path/to/safer-ralph"
-```
+1. **safer-ralph:** Install and link to your path.
+   ```bash
+   git clone https://github.com/ianchanning/safer-ralph
+   cd safer-ralph && ./sandbox.sh build
+   mkdir -p ~/.local/bin
+   ln -s "$(pwd)/sandbox.sh" ~/.local/bin/sandbox.sh
+   ```
+2. **gemini-cli:** Required for the Architect (host-side reasoning).
+   ```bash
+   npm install -g @google/gemini-cli
+   ```
+3. **Docker:** Required for the sandboxes.
 
 ---
 
@@ -50,57 +54,48 @@ export PATH="$PATH:/path/to/safer-ralph"
 git clone https://github.com/ianchanning/beam-forge
 cd beam-forge
 
-# Write your intent (you own this file, it never changes)
+# You can now use the templates to start a loop:
 cp templates/intent.example.md intent.md
-vim intent.md
-
-# Write your initial strategy (beam-forge will evolve this)
 cp templates/strategy.example.md strategy_v1.md
-vim strategy_v1.md
-
-# Unleash
-./beam_forge.sh run -i intent.md -s strategy_v1.md -r https://github.com/your/repo
+./beam_forge.sh run -i intent.md -s strategy_v1.md -r https://github.com/ianchanning/calculator-toy
 ```
+
+---
+
+## How it Works
+
+1. **Worker:** Executes in a fresh sandbox. Clones the repo and attempts to fulfill the `intent.md` using the `strategy.md`. Its full trace is captured.
+2. **Handoff:** The modified workspace from the Worker is copied to a *fresh* Judge sandbox. This ensures the Judge sees the actual code changes, but in a clean environment (no "poisoned well").
+3. **Judge:** Adversarially evaluates the Worker's trace and the resulting codebase. It looks for "Clever Hans" shortcuts and functional flaws.
+4. **Architect:** If the Judge fails the generation, the Architect (running on the host via `gemini-cli`) analyzes the critique and mutates the `strategy.md` to prevent similar failures in the next generation.
+5. **Scorched Earth:** All sandboxes and temporary workspaces are purged between generations. Evolution starts from true zero every time.
 
 ---
 
 ## Structure
 
 ```
-beam_forge.sh              # The loop. Read this first.
+beam_forge.sh              # The loop orchestrator.
+ralph.sh                   # The heartbeat loop (injected into sandboxes).
 protocols/
-  BEAM_FORGE.md            # The original concept
-  BEAM_FORGE_IMPL.md       # The ratified implementation spec
-  worker.md                # Worker system prompt
-  judge.md                 # Judge system prompt
-  architect.md             # Architect system prompt
+  worker.md                # Worker system prompt.
+  judge.md                 # Judge system prompt.
+  architect.md             # Architect system prompt.
 templates/
   intent.example.md
   strategy.example.md
-runs/                      # Generated. One dir per generation.
-  1/
-    worker_trace.txt
-    verdict.txt
-  2/
-    ...
-orchestrator/              # Stage 3: Elixir supervision (optional)
-  README.md
+runs/                      # Generated logs and traces per generation.
 ```
 
 ---
 
-## The Trail
+## Configuration
 
-This project is built in stages. If something seems complex, read the layer below it.
-
-| Layer | What it is | Read |
-|-------|-----------|------|
-| Concept | The BEAM_FORGE protocol | `protocols/BEAM_FORGE.md` |
-| Reference | Bash implementation | `beam_forge.sh` |
-| Spec | How the bash was designed | `protocols/BEAM_FORGE_IMPL.md` |
-| Optional | Elixir supervision layer | `orchestrator/README.md` |
-
-The Elixir layer is not required. `beam_forge.sh` is the real thing. Elixir adds crash recovery and parallelism when you need them — you probably don't yet.
+```bash
+export BEAM_MAX_GENERATIONS=5      # default: 5
+export BEAM_MAX_STRATEGY_TOKENS=2000  # default: 2000
+export GEMINI_MODEL=gemini-2.5-flash # Used by ralph.sh and Architect
+```
 
 ---
 
@@ -111,24 +106,6 @@ The Elixir layer is not required. `beam_forge.sh` is the real thing. Elixir adds
 | `0` | `[PASS]` — see `strategy_vSUCCESS.md` |
 | `1` | Unexpected error — check `runs/` |
 | `2` | `DUNKIRK` — MAX_GENERATIONS hit, human needed |
-
----
-
-## Configuration
-
-```bash
-export BEAM_MAX_GENERATIONS=5      # default: 5
-export BEAM_MAX_STRATEGY_TOKENS=2000  # default: 2000
-export SANDBOX_PATH=/path/to/safer-ralph  # if not on PATH
-```
-
----
-
-## What this is not
-
-- Not a safer-ralph fork. safer-ralph is untouched.
-- Not a multi-agent framework. It's a bash loop and three system prompts.
-- Not production infrastructure. It's a pottery wheel.
 
 ---
 
