@@ -59,7 +59,7 @@ cp templates/strategy.example.md strategy_v1.md
 vim strategy_v1.md
 
 # Unleash
-./beam_forge.sh run intent.md strategy_v1.md https://github.com/your/repo
+./beam_forge.sh run -i intent.md -s strategy_v1.md -r https://github.com/your/repo
 ```
 
 ---

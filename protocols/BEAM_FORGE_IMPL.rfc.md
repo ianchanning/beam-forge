@@ -90,7 +90,10 @@ beam_forge.sh status   # prints: generation N, last verdict
 
 **Open questions for ratification `(?)`:**
 
-- Does the Judge need its own fresh container, or can it inspect the Worker's container before purge? Fresh is purer but doubles container cost per generation.
+- **RESOLVED:** Does the Judge need its own fresh container? **YES.**
+- **CRITICAL FLAW:** The Judge cannot just `git clone` the repo. It needs the *modified* state from the Worker.
+    *   *Solution:* The Orchestrator (Bash/Elixir) must copy the contents of the Worker's volume (`workspace-$WORKER_ID`) to the Judge's volume (`workspace-$JUDGE_ID`) before the Judge starts.
+    *   *Constraint:* We cannot simply re-use the Worker's container because we need to detect "poisoned environment" attacks or accidental dependency installations that wouldn't persist in a fresh deploy.
 - Does the Architect need a full sandbox? It's a pure reasoning task — could be a bare `claude -p` call with no Docker at all, saving significant time.
 - How is MAX_TOKEN_LIMIT on the Architect enforced in bash? Word count check on `strategy_v{N+1}.md` before accepting it, rejecting and re-prompting if over limit?
 - Clever Hans detection: what concrete checks does the Judge perform beyond "run the tests"? Needs a definition before `judge.md` can be written.

@@ -19,9 +19,12 @@ Build an evolutionary loop for AI agents.
 
 ## The Rabbit Hole Tracker
 - [/] Forge `beam_forge.sh` (Structure only).
+- [x] Patch `safer-ralph/sandbox.sh` for global CLI usage (Location Agnosticism).
 - [x] Scribe `protocols/worker.md`.
 - [x] Scribe `protocols/judge.md`.
 - [x] Scribe `protocols/architect.md`.
+- [x] Copy `ralph.sh` to `beam-forge` for local refinement.
+- [ ] Wire up `beam_forge.sh` to use `sandbox.sh` and `ralph.sh`.
 - [ ] First run: Evolution of a simple script.
 
 ## The Meta-Conflict Check

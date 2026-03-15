@@ -33,6 +33,104 @@ EOF
     exit 1
 }
 
+# --- Helper Functions ---
+
+create_sandbox() {
+    local name
+    name=$(sandbox.sh create)
+    echo "$name"
+}
+
+clone_repo() {
+    local name=$1
+    local repo_url=$2
+    log "Cloning $repo_url into $name..."
+    sandbox.sh clone "$name" "$repo_url" .
+}
+
+inject_files() {
+    local name=$1
+    shift
+    local workspace_dir="./workspace-$name"
+    mkdir -p "$workspace_dir"
+    for file in "$@"; do
+        if [[ -f "$file" ]]; then
+            cp "$file" "$workspace_dir/"
+        else
+            log "${YELLOW}Warning: File not found for injection: $file${NC}"
+        fi
+    done
+}
+
+exec_ralph() {
+    local name=$1
+    local prompt=$2
+    local output_file=$3
+    local system_prompt_file=${4:-}
+    
+    log "Executing Ralph in $name..."
+    # We use our local ralph.sh by injecting it into the workspace
+    cp ./ralph.sh "./workspace-$name/ralph.sh"
+    chmod +x "./workspace-$name/ralph.sh"
+    
+    local cmd
+    if [[ -n "$system_prompt_file" ]]; then
+        cmd="SYSTEM_PROMPT_FILE=/workspace/$system_prompt_file /workspace/ralph.sh 1 gemini \"$prompt\""
+    else
+        cmd="/workspace/ralph.sh 1 gemini \"$prompt\""
+    fi
+    
+    docker exec "$name" bash -c "$cmd" > "$output_file" 2>&1 || true
+}
+
+handoff_state() {
+    local src_name=$1
+    local dest_name=$2
+    log "Handing off state from $src_name to $dest_name..."
+    local src_dir="./workspace-$src_name"
+    local dest_dir="./workspace-$dest_name"
+    mkdir -p "$dest_dir"
+    # Use sudo if necessary, but sandbox.sh should handle permissions
+    # We copy everything EXCEPT the injected protocols if they might conflict
+    cp -rp "$src_dir/." "$dest_dir/"
+}
+
+call_architect() {
+    local current_strategy=$1
+    local verdict_file=$2
+    local output_file=$3
+    
+    log "Calling Architect to mutate strategy..."
+    
+    # We use the gemini CLI on host
+    # system prompt: protocols/architect.md
+    # prompt: current strategy + verdict
+    
+    local system_prompt
+    system_prompt=$(cat "protocols/architect.md")
+    
+    local prompt
+    prompt="CURRENT STRATEGY:
+$(cat "$current_strategy")
+
+JUDGE VERDICT AND CRITIQUE:
+$(cat "$verdict_file")
+
+Evolve the strategy to prevent the failure described in the critique. Output ONLY the new strategy.md content."
+
+    # Use --yolo and --model if needed, but assuming gemini is configured
+    gemini --yolo -p "SYSTEM_PROMPT:
+$system_prompt
+
+$prompt" > "$output_file"
+}
+
+purge_sandbox() {
+    local name=$1
+    log "Purging sandbox $name..."
+    sandbox.sh purge "$name"
+}
+
 run_loop() {
     local intent_file=$1
     local strategy_file=$2
@@ -56,27 +154,56 @@ run_loop() {
 
         # 1. WORKER PHASE
         log "Phase: WORKER (Execution)"
-        # TODO: sandbox.sh go $repo_url
-        # TODO: Inject protocols/worker.md + intent_file + current_strategy
-        # TODO: Capture trace to $gen_dir/worker_trace.txt
-        echo "Worker trace placeholder" > "$gen_dir/worker_trace.txt"
+        worker_id=$(create_sandbox)
+        log "Worker ID: $worker_id"
+        
+        clone_repo "$worker_id" "$repo_url"
+        
+        # Prepare combined system prompt for Worker: worker.md + current strategy
+        combined_worker_prompt="$gen_dir/worker_combined.md"
+        cat "protocols/worker.md" > "$combined_worker_prompt"
+        echo -e "\n\n# CURRENT STRATEGY\n" >> "$combined_worker_prompt"
+        cat "$current_strategy" >> "$combined_worker_prompt"
+        
+        inject_files "$worker_id" "$intent_file" "$combined_worker_prompt"
+        
+        # Construct the worker directive
+        worker_directive="Execute intent.md. Follow the instructions in your system prompt strictly."
+        
+        exec_ralph "$worker_id" "$worker_directive" "$gen_dir/worker_trace.txt" "$(basename "$combined_worker_prompt")"
 
         # 2. JUDGE PHASE
         log "Phase: JUDGE (Evaluation)"
-        # TODO: sandbox.sh go $repo_url (fresh)
-        # TODO: Inject protocols/judge.md + $gen_dir/worker_trace.txt + intent_file
-        # TODO: Capture verdict to $gen_dir/verdict.txt
-        # For now, let's simulate a failure until we have real execution
-        echo "[FAIL]" > "$gen_dir/verdict.txt"
-        echo "---" >> "$gen_dir/verdict.txt"
-        echo "Critique placeholder: Strategy needs more grit." >> "$gen_dir/verdict.txt"
+        judge_id=$(create_sandbox)
+        log "Judge ID: $judge_id"
+        
+        handoff_state "$worker_id" "$judge_id"
+        
+        # Prepare combined system prompt for Judge: judge.md + intent
+        combined_judge_prompt="$gen_dir/judge_combined.md"
+        cat "protocols/judge.md" > "$combined_judge_prompt"
+        echo -e "\n\n# INTENT TO EVALUATE\n" >> "$combined_judge_prompt"
+        cat "$intent_file" >> "$combined_judge_prompt"
+        
+        inject_files "$judge_id" "$combined_judge_prompt"
+        
+        # Construct the judge directive
+        # We pass the trace as part of the directive, but it might be too large.
+        # Ideally the Judge reads it from the workspace.
+        inject_files "$judge_id" "$gen_dir/worker_trace.txt"
+        
+        judge_directive="Evaluate the Worker's execution. Read worker_trace.txt to understand what they did. Output [PASS] or [FAIL] followed by your critique."
+        
+        exec_ralph "$judge_id" "$judge_directive" "$gen_dir/verdict.txt" "$(basename "$combined_judge_prompt")"
 
         # 3. VERDICT ANALYSIS
-        verdict=$(head -n 1 "$gen_dir/verdict.txt")
-        if [[ "$verdict" == "[PASS]" ]]; then
+        # The verdict.txt contains the full ralph output. We need to find [PASS] or [FAIL]
+        if grep -q "\[PASS\]" "$gen_dir/verdict.txt"; then
             success "Intent satisfied in Generation $gen!"
             cp "$current_strategy" "strategy_vSUCCESS.md"
             log "Frozen successful strategy to: strategy_vSUCCESS.md"
+            purge_sandbox "$worker_id"
+            purge_sandbox "$judge_id"
             exit 0
         fi
 
@@ -86,15 +213,16 @@ run_loop() {
 
         # 4. ARCHITECT PHASE
         log "Phase: ARCHITECT (Mutation)"
-        next_strategy="strategy_v$((gen + 1)).md"
-        # TODO: Call Architect with current_strategy + $gen_dir/verdict.txt
-        # TODO: Enforce token limits
-        echo "Strategy v$((gen + 1)) placeholder" > "$next_strategy"
-        current_strategy="$next_strategy"
+        next_strategy_file="strategy_v$((gen + 1)).md"
+        
+        call_architect "$current_strategy" "$gen_dir/verdict.txt" "$next_strategy_file"
+        
+        current_strategy="$next_strategy_file"
 
         # 5. SCORCHED EARTH
         log "Phase: SCORCHED EARTH (Purge)"
-        # TODO: sandbox.sh purge
+        purge_sandbox "$worker_id"
+        purge_sandbox "$judge_id"
     done
 }
 
