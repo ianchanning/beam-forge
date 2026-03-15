@@ -90,9 +90,19 @@ handoff_state() {
     local src_dir="./workspace-$src_name"
     local dest_dir="./workspace-$dest_name"
     mkdir -p "$dest_dir"
-    # Use sudo if necessary, but sandbox.sh should handle permissions
-    # We copy everything EXCEPT the injected protocols if they might conflict
-    cp -rp "$src_dir/." "$dest_dir/"
+    
+    # We copy everything EXCEPT the target directory to avoid permission issues and bloat.
+    # The Judge sandbox should rebuild anyway to ensure a clean state.
+    # We use find to avoid copying hidden files like .git if we want, but actually we want the whole repo state.
+    # Using cp -rp but avoiding the error-prone files.
+    
+    for item in "$src_dir"/* "$src_dir"/.*; do
+        local base_item=$(basename "$item")
+        if [[ "$base_item" == "." || "$base_item" == ".." || "$base_item" == "target" ]]; then
+            continue
+        fi
+        cp -rp "$item" "$dest_dir/"
+    done
 }
 
 call_architect() {
